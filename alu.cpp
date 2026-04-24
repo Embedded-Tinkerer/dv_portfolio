@@ -29,10 +29,8 @@ public:
     }
 };
 
-// --- NEW: Instruction RAM ---
 class InstructionMemory {
 private:
-    // This perfectly models an L1 Instruction Cache (64 slots)
     uint32_t memory[64] = {0}; 
 public:
     void load_program(uint32_t address, uint32_t instruction) {
@@ -44,62 +42,63 @@ public:
     }
 };
 
-// --- UPDATED: The CPU Core ---
+// --- UPDATED: CPU Core with Branching ---
 class CPU_Core {
 private:
     SimpleALU alu;
     RegisterFile regs;
     InstructionMemory i_mem;
-    
-    uint32_t pc; // NEW: The Program Counter
+    uint32_t pc; 
 
 public:
-    CPU_Core() {
-        pc = 0; // The CPU boots up pointing to memory address 0
-    }
-
-    // Backdoor injection for testing
+    CPU_Core() { pc = 0; }
     void load_data(uint8_t reg, uint32_t val) { regs.write_reg(reg, val); }
     void flash_rom(uint32_t address, uint32_t instruction) { i_mem.load_program(address, instruction); }
 
-    // THE CLOCK CYCLE
     void tick() {
-        // 1. FETCH
         uint32_t instruction = i_mem.fetch(pc);
-        
-        // Safety: If the CPU reads an empty memory slot, stop the clock.
         if (instruction == 0) {
-            cout << "HALT: End of program reached at PC=" << pc << endl;
+            cout << "\nHALT: End of program reached at PC=" << pc << endl;
             return;
         }
 
-        // 2. DECODE
         uint8_t opcode   = (instruction >> 24) & 0xFF; 
         uint8_t dest_reg = (instruction >> 16) & 0xFF;
         uint8_t src_a    = (instruction >> 8)  & 0xFF;
         uint8_t src_b    = (instruction >> 0)  & 0xFF;
 
-        // 3. EXECUTE
         uint32_t val_a = regs.read_reg(src_a);
         uint32_t val_b = regs.read_reg(src_b);
-        uint32_t alu_out = alu.execute(opcode, val_a, val_b);
 
-        // 4. WRITE-BACK
-        regs.write_reg(dest_reg, alu_out);
+        bool branch_taken = false;
 
-        // Print the clock cycle results
-        cout << "Clock Tick [PC " << pc << "]: "
-             << "Opcode " << (int)opcode 
-             << " | Wrote " << alu_out << " to Reg " << (int)dest_reg << endl;
+        // NEW: Hardware Branching Logic
+        if (opcode == 4) { 
+            if (val_a == val_b) {
+                pc = dest_reg; // Overwrite the Program Counter!
+                branch_taken = true;
+                cout << "Clock Tick: BRANCH TAKEN -> Jumping to PC " << pc << endl;
+            } else {
+                cout << "Clock Tick: Branch condition false (continuing normally)" << endl;
+            }
+        } 
+        // Normal Math Logic
+        else {
+            uint32_t alu_out = alu.execute(opcode, val_a, val_b);
+            regs.write_reg(dest_reg, alu_out);
+            cout << "Clock Tick [PC " << pc << "]: Math Opcode " << (int)opcode 
+                 << " | Wrote " << alu_out << " to Reg " << (int)dest_reg << endl;
+        }
 
-        // 5. INCREMENT
-        pc++; 
+        // Only increment PC if we didn't just jump to a new address
+        if (!branch_taken) {
+            pc++; 
+        }
     }
 
-    // Run the CPU automatically for a set number of cycles
     void run(int cycles) {
         for (int i = 0; i < cycles; i++) {
-            if (i_mem.fetch(pc) == 0) break; // Auto-halt
+            if (i_mem.fetch(pc) == 0) break; 
             tick();
         }
     }
@@ -107,29 +106,30 @@ public:
 
 int main() {
     CPU_Core my_cpu;
+    cout << "--- Starting Day 5: Hardware Branching (While Loop) ---" << endl;
 
-    cout << "--- Starting Day 4: Automated CPU Loop ---" << endl;
+    // 1. Setup Data Memory for the Loop
+    my_cpu.load_data(1, 0); // Reg 1: The Counter (Starts at 0)
+    my_cpu.load_data(2, 1); // Reg 2: The Step (Always 1)
+    my_cpu.load_data(3, 3); // Reg 3: The Target (Count to 3)
 
-    // 1. Setup Data Memory
-    my_cpu.load_data(1, 100); 
-    my_cpu.load_data(2, 25);
+    // 2. Flash the Program Memory
+    
+    // PC 0: ADD Reg 1 and Reg 2, save in Reg 1 (Counter = Counter + 1)
+    my_cpu.flash_rom(0, 0x00010102); 
+
+    // PC 1: BEQ -> If Reg 1 == Reg 3, jump to Target PC 3 (Exit the loop)
+    my_cpu.flash_rom(1, 0x04030103); 
 
     // ==========================================
-    // YOUR ASSIGNMENT: Flash the Program Memory
+    // YOUR ASSIGNMENT: Write the Unconditional Jump
     // ==========================================
-    // Replace the 0x00000000 with the correct 32-bit hex instructions:
-    
-    // Instr 0: ADD Reg 1 and Reg 2, save in Reg 3
-    my_cpu.flash_rom(0, 0x00030102); 
-    
-    // Instr 1: SUB Reg 3 and Reg 2, save in Reg 4
-    my_cpu.flash_rom(1, 0x01040302); 
-    
-    // Instr 2: Bitwise OR Reg 4 and Reg 1, save in Reg 5
-    my_cpu.flash_rom(2, 0x03050401); 
+    // PC 2: BEQ -> If Reg 2 == Reg 2, jump to Target PC 0 (Loop back to start)
+    // Reg 2 always equals Reg 2, so this will ALWAYS jump back.
+    my_cpu.flash_rom(2, 0x00000000); // REPLACE THIS HEX CODE
 
-    // Turn on the clock!
-    my_cpu.run(10); // Let the CPU run (it will automatically halt at PC 3)
+    // Run the CPU for 15 cycles (it should exit the loop safely before that)
+    my_cpu.run(15); 
 
     return 0;
 }

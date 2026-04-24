@@ -1,3 +1,4 @@
 *.o
 *.out
+alu_exec
 /bin/
