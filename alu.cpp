@@ -3,6 +3,7 @@
 
 using namespace std;
 
+// --- EXISTING HARDWARE ---
 class RegisterFile {
 private:
     uint32_t registers[32] = {0}; 
@@ -22,8 +23,8 @@ public:
         switch (opcode) {
             case 0: return operand_a + operand_b; 
             case 1: return operand_a - operand_b; 
-            case 2: return operand_a & operand_b; 
-            case 3: return operand_a | operand_b; 
+            case 2: return operand_a & operand_b; // Restored Bitwise AND
+            case 3: return operand_a | operand_b; // Restored Bitwise OR
             default: return 0; 
         }
     }
@@ -42,12 +43,27 @@ public:
     }
 };
 
-// --- UPDATED: CPU Core with Branching ---
+// --- NEW: Data RAM (SRAM) ---
+class DataMemory {
+private:
+    uint32_t memory[256] = {0}; // 256 slots of main memory
+public:
+    void write_mem(uint32_t address, uint32_t data) {
+        if (address < 256) memory[address] = data;
+    }
+    uint32_t read_mem(uint32_t address) {
+        if (address < 256) return memory[address];
+        return 0;
+    }
+};
+
+// --- UPDATED: CPU Core ---
 class CPU_Core {
 private:
     SimpleALU alu;
     RegisterFile regs;
     InstructionMemory i_mem;
+    DataMemory d_mem; 
     uint32_t pc; 
 
 public:
@@ -63,37 +79,44 @@ public:
         }
 
         uint8_t opcode   = (instruction >> 24) & 0xFF; 
-        uint8_t dest_reg = (instruction >> 16) & 0xFF;
-        uint8_t src_a    = (instruction >> 8)  & 0xFF;
-        uint8_t src_b    = (instruction >> 0)  & 0xFF;
-
-        uint32_t val_a = regs.read_reg(src_a);
-        uint32_t val_b = regs.read_reg(src_b);
+        uint8_t reg_a    = (instruction >> 16) & 0xFF;
+        uint8_t reg_b    = (instruction >> 8)  & 0xFF;
 
         bool branch_taken = false;
 
-        // NEW: Hardware Branching Logic
-        if (opcode == 4) { 
-            if (val_a == val_b) {
-                pc = dest_reg; // Overwrite the Program Counter!
-                branch_taken = true;
-                cout << "Clock Tick: BRANCH TAKEN -> Jumping to PC " << pc << endl;
-            } else {
-                cout << "Clock Tick: Branch condition false (continuing normally)" << endl;
-            }
+        // Route the instruction based on Opcode (The Multiplexer Logic)
+        if (opcode == 5) { 
+            // STR: Store Data to RAM
+            uint32_t data_to_store = regs.read_reg(reg_a);
+            uint32_t ram_address   = regs.read_reg(reg_b);
+            d_mem.write_mem(ram_address, data_to_store);
+            cout << "Clock Tick [PC " << pc << "]: STORE -> Wrote " << data_to_store 
+                 << " to RAM Address " << ram_address << endl;
         } 
-        // Normal Math Logic
+        else if (opcode == 6) { 
+            // LDR: Load Data from RAM
+            uint32_t ram_address = regs.read_reg(reg_b);
+            uint32_t loaded_data = d_mem.read_mem(ram_address);
+            regs.write_reg(reg_a, loaded_data);
+            cout << "Clock Tick [PC " << pc << "]: LOAD  -> Read " << loaded_data 
+                 << " from RAM Address " << ram_address << " into Reg " << (int)reg_a << endl;
+        }
+        else if (opcode == 4) { 
+            // BEQ: Branch logic
+            pc = reg_a; 
+            branch_taken = true;
+        } 
         else {
+            // ALU Math
+            uint32_t val_a = regs.read_reg(reg_b);
+            uint32_t val_b = regs.read_reg(instruction & 0xFF);
             uint32_t alu_out = alu.execute(opcode, val_a, val_b);
-            regs.write_reg(dest_reg, alu_out);
-            cout << "Clock Tick [PC " << pc << "]: Math Opcode " << (int)opcode 
-                 << " | Wrote " << alu_out << " to Reg " << (int)dest_reg << endl;
+            regs.write_reg(reg_a, alu_out);
+            cout << "Clock Tick [PC " << pc << "]: MATH  -> Opcode " << (int)opcode 
+                 << " | Result " << alu_out << " into Reg " << (int)reg_a << endl;
         }
 
-        // Only increment PC if we didn't just jump to a new address
-        if (!branch_taken) {
-            pc++; 
-        }
+        if (!branch_taken) pc++; 
     }
 
     void run(int cycles) {
@@ -106,30 +129,20 @@ public:
 
 int main() {
     CPU_Core my_cpu;
-    cout << "--- Starting Day 5: Hardware Branching (While Loop) ---" << endl;
+    cout << "--- Starting Day 6: The Load/Store Architecture ---" << endl;
 
-    // 1. Setup Data Memory for the Loop
-    my_cpu.load_data(1, 0); // Reg 1: The Counter (Starts at 0)
-    my_cpu.load_data(2, 1); // Reg 2: The Step (Always 1)
-    my_cpu.load_data(3, 3); // Reg 3: The Target (Count to 3)
+    // Setup: Reg 1 has the payload (999). Reg 2 has the target RAM address (15).
+    my_cpu.load_data(1, 999); 
+    my_cpu.load_data(2, 15);  
 
-    // 2. Flash the Program Memory
+    // PC 0: STR (Opcode 05) -> Store contents of Reg 1 into RAM address held in Reg 2
+    my_cpu.flash_rom(0, 0x05010200); 
     
-    // PC 0: ADD Reg 1 and Reg 2, save in Reg 1 (Counter = Counter + 1)
-    my_cpu.flash_rom(0, 0x00010102); 
+    // PC 1: LDR (Opcode 06) -> Load RAM address held in Reg 2 into Reg 3
+    my_cpu.flash_rom(1, 0x06030200); 
 
-    // PC 1: BEQ -> If Reg 1 == Reg 3, jump to Target PC 3 (Exit the loop)
-    my_cpu.flash_rom(1, 0x04030103); 
-
-    // ==========================================
-    // YOUR ASSIGNMENT: Write the Unconditional Jump
-    // ==========================================
-    // PC 2: BEQ -> If Reg 2 == Reg 2, jump to Target PC 0 (Loop back to start)
-    // Reg 2 always equals Reg 2, so this will ALWAYS jump back.
-    my_cpu.flash_rom(2, 0x04000202); // REPLACE THIS HEX CODE
-
-    // Run the CPU for 15 cycles (it should exit the loop safely before that)
-    my_cpu.run(15); 
+    // Let the CPU run!
+    my_cpu.run(5); 
 
     return 0;
 }
