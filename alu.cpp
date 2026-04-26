@@ -126,7 +126,7 @@ int main() {
     // ==========================================
     // PC 2: BEQ -> If Reg 2 == Reg 2, jump to Target PC 0 (Loop back to start)
     // Reg 2 always equals Reg 2, so this will ALWAYS jump back.
-    my_cpu.flash_rom(2, 0x00000000); // REPLACE THIS HEX CODE
+    my_cpu.flash_rom(2, 0x04000202); // REPLACE THIS HEX CODE
 
     // Run the CPU for 15 cycles (it should exit the loop safely before that)
     my_cpu.run(15); 
