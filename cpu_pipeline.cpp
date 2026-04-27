@@ -207,4 +207,28 @@ public:
             tick();
         }
     }
+int main() {
+    Pipelined_CPU my_cpu;
+    cout << "--- Testing the 5-Stage Pipeline ---" << endl;
+
+    // 1. Pre-load the Register File with dummy data
+    my_cpu.load_data(1, 10);
+    my_cpu.load_data(2, 20);
+    my_cpu.load_data(4, 50);
+    my_cpu.load_data(5, 15);
+
+    // 2. Load HAZARD-FREE instructions. 
+    // Notice how they use completely different registers.
+    
+    // PC 0: ADD Reg 3, Reg 1, Reg 2  (10 + 20 = 30)
+    my_cpu.flash_rom(0, 0x00030102); 
+
+    // PC 1: SUB Reg 6, Reg 4, Reg 5  (50 - 15 = 35)
+    my_cpu.flash_rom(1, 0x01060405);
+
+    // 3. Run the clock for 7 cycles to let the pipeline fill and drain
+    my_cpu.run(7);
+
+    return 0;
+}
 };
