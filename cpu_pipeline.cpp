@@ -73,6 +73,8 @@ struct ID_EX_Reg {
     uint8_t  dest_reg;
     uint32_t val_a;
     uint32_t val_b;
+    uint8_t src_a;
+    uint8_t src_b;
 };
 
 struct EX_MEM_Reg {
@@ -109,7 +111,7 @@ public:
     Pipelined_CPU() { 
         pc = 0; 
         if_id_current  = {0, 0};      if_id_next  = {0, 0};
-        id_ex_current  = {0, 0, 0, 0}; id_ex_next  = {0, 0, 0, 0};
+        id_ex_current  = {0, 0, 0, 0, 0, 0}; id_ex_next  = {0, 0, 0, 0, 0, 0};
         ex_mem_current = {0, 0, 0};   ex_mem_next = {0, 0, 0};
         mem_wb_current = {0, 0};      mem_wb_next = {0, 0};
     }
@@ -127,7 +129,7 @@ public:
         
         if (wb_dest != 0) { // Don't write to Reg 0 (common RISC architecture rule)
             regs.write_reg(wb_dest, wb_data);
-            // cout << "WB Stage  -> Wrote " << wb_data << " to Reg " << (int)wb_dest << endl;
+             cout << "WB Stage  -> Wrote " << wb_data << " to Reg " << (int)wb_dest << endl;
         }
 
         // ==========================================
@@ -158,7 +160,34 @@ public:
         uint32_t val_b    = id_ex_current.val_b;
         uint8_t ex_dest   = id_ex_current.dest_reg;
 
+        // ==========================================
+        // FORWARDING UNIT (Data Hazard Bypass)
+        // ==========================================
+        
+        // 1. Check Source A
+        if (ex_mem_current.dest_reg != 0) {
+            // Does the address MEM is writing to match the address EX needs?
+            if (ex_mem_current.dest_reg == id_ex_current.src_a) {
+                // Hazard detected! Overwrite the stale 'val_a' with the fresh math answer.
+                val_a = ex_mem_current.alu_out; 
+                cout << "  [FORWARDING] Snagged " << val_a << " for Source A!" << endl;
+            }
+        }
+
+        // 2. Check Source B
+        if (ex_mem_current.dest_reg != 0) {
+            // Does the address MEM is writing to match the address EX needs?
+            if (ex_mem_current.dest_reg == id_ex_current.src_b) {
+                // Hazard detected! Overwrite the stale 'val_b' with the fresh math answer.
+                val_b = ex_mem_current.alu_out; 
+                cout << "  [FORWARDING] Snagged " << val_b << " for Source B!" << endl;
+            }
+        }      
+
         uint32_t alu_result = alu.execute(ex_opcode, val_a, val_b);
+
+        if (ex_opcode == 0 || ex_opcode == 1) 
+            cout << "  [EX] ALU calculated: " << alu_result << endl;
 
         ex_mem_next.alu_out  = alu_result;
         ex_mem_next.opcode   = ex_opcode;
@@ -177,11 +206,13 @@ public:
         uint32_t read_a = regs.read_reg(src_a);
         uint32_t read_b = regs.read_reg(src_b);
 
+
         id_ex_next.opcode   = id_opcode;
         id_ex_next.dest_reg = id_dest;
         id_ex_next.val_a    = read_a;
         id_ex_next.val_b    = read_b;
-
+        id_ex_next.src_a = src_a; // Pass the address forward!
+        id_ex_next.src_b = src_b;
         // ==========================================
         // 1. INSTRUCTION FETCH (IF)
         // ==========================================
@@ -199,6 +230,7 @@ public:
         ex_mem_current = ex_mem_next;
         id_ex_current  = id_ex_next;
         if_id_current  = if_id_next;
+
     }
 
     void run(int cycles) {
@@ -207,28 +239,28 @@ public:
             tick();
         }
     }
+};
 int main() {
     Pipelined_CPU my_cpu;
-    cout << "--- Testing the 5-Stage Pipeline ---" << endl;
+    cout << "--- Day 8: Triggering a Data Hazard ---" << endl;
 
-    // 1. Pre-load the Register File with dummy data
-    my_cpu.load_data(1, 10);
-    my_cpu.load_data(2, 20);
-    my_cpu.load_data(4, 50);
-    my_cpu.load_data(5, 15);
+    // 1. Pre-load Reg 2 and Reg 3
+    my_cpu.load_data(2, 10);
+    my_cpu.load_data(3, 20);
+    my_cpu.load_data(5, 5);
 
-    // 2. Load HAZARD-FREE instructions. 
-    // Notice how they use completely different registers.
+    // 2. Load the HAZARDOUS instructions
     
-    // PC 0: ADD Reg 3, Reg 1, Reg 2  (10 + 20 = 30)
-    my_cpu.flash_rom(0, 0x00030102); 
+    // PC 0: ADD Reg 1, Reg 2, Reg 3  (10 + 20 = 30) -> Saves to R1
+    my_cpu.flash_rom(0, 0x00010203); 
 
-    // PC 1: SUB Reg 6, Reg 4, Reg 5  (50 - 15 = 35)
-    my_cpu.flash_rom(1, 0x01060405);
+    // PC 1: SUB Reg 4, Reg 1, Reg 5  (Should be 30 - 5 = 25)
+    // HAZARD: It will read R1 before the ADD finishes writing to it!
+    my_cpu.flash_rom(1, 0x01040105);
 
-    // 3. Run the clock for 7 cycles to let the pipeline fill and drain
+    // Run 7 cycles
     my_cpu.run(7);
 
     return 0;
 }
-};
+;
