@@ -206,13 +206,33 @@ public:
         uint32_t read_a = regs.read_reg(src_a);
         uint32_t read_b = regs.read_reg(src_b);
 
+        // --- THE HAZARD DETECTION UNIT ---
+        bool stall = false;
 
-        id_ex_next.opcode   = id_opcode;
-        id_ex_next.dest_reg = id_dest;
-        id_ex_next.val_a    = read_a;
-        id_ex_next.val_b    = read_b;
-        id_ex_next.src_a = src_a; // Pass the address forward!
-        id_ex_next.src_b = src_b;
+        if (id_ex_current.opcode == 6) { // If the instruction ahead is a Load
+            if (id_ex_current.dest_reg == src_a || id_ex_current.dest_reg == src_b) {
+                stall = true;
+                cout << "  [STALL] Load-Use Hazard detected! Freezing IF/ID and injecting a Bubble." << endl;
+            }
+        }
+
+        if (stall) {
+            // Inject Bubble
+            id_ex_next.opcode   = 0; 
+            id_ex_next.dest_reg = 0;
+            id_ex_next.val_a    = 0;
+            id_ex_next.val_b    = 0;
+            id_ex_next.src_a    = 0;
+            id_ex_next.src_b    = 0;
+        } else {
+            // Normal Operation
+            id_ex_next.opcode   = id_opcode;
+            id_ex_next.dest_reg = id_dest;
+            id_ex_next.val_a    = read_a;
+            id_ex_next.val_b    = read_b;
+            id_ex_next.src_a    = src_a; 
+            id_ex_next.src_b    = src_b; 
+        }
         // ==========================================
         // 1. INSTRUCTION FETCH (IF)
         // ==========================================
@@ -242,25 +262,29 @@ public:
 };
 int main() {
     Pipelined_CPU my_cpu;
-    cout << "--- Day 8: Triggering a Data Hazard ---" << endl;
+    cout << "--- Day 9: Triggering a Load-Use Stall ---" << endl;
 
-    // 1. Pre-load Reg 2 and Reg 3
-    my_cpu.load_data(2, 10);
-    my_cpu.load_data(3, 20);
-    my_cpu.load_data(5, 5);
+    // 1. Pre-load some data into the Data RAM (Address 100 holds the value 99)
+    my_cpu.load_data(2, 100); // Put the RAM address '100' into Reg 2
+    // Assume we added a d_mem.write_mem(100, 99) helper here for the test:
+    // (For this test, let's just pretend the RAM outputs 99 when Address 100 is requested)
 
     // 2. Load the HAZARDOUS instructions
     
-    // PC 0: ADD Reg 1, Reg 2, Reg 3  (10 + 20 = 30) -> Saves to R1
-    my_cpu.flash_rom(0, 0x00010203); 
+    // PC 0: LDR Reg 1, [Reg 2]  (Opcode 6)
+    // Loads the data from RAM address 100 into Reg 1.
+    my_cpu.flash_rom(0, 0x06010200); 
 
-    // PC 1: SUB Reg 4, Reg 1, Reg 5  (Should be 30 - 5 = 25)
-    // HAZARD: It will read R1 before the ADD finishes writing to it!
-    my_cpu.flash_rom(1, 0x01040105);
+    // PC 1: ADD Reg 4, Reg 1, Reg 5  (Opcode 0)
+    // HAZARD: Needs Reg 1 immediately for math!
+    my_cpu.flash_rom(1, 0x00040105);
 
-    // Run 7 cycles
-    my_cpu.run(7);
+    // PC 2: SUB Reg 6, Reg 4, Reg 5 (Just a safe padding instruction)
+    my_cpu.flash_rom(2, 0x01060405);
+
+    // Run 8 cycles
+    my_cpu.run(8);
 
     return 0;
 }
-;
+
